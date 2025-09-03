@@ -1,4 +1,5 @@
 "use client"
+
 import { useEffect, useRef, useState } from "react"
 
 interface AnimatedZionLogoProps {
@@ -19,6 +20,7 @@ export function AnimatedZionLogo({ onAnimationComplete, className = "" }: Animat
       if (!svgRef.current) return
 
       const paths = ["#zion-z", "#zion-i", "#zion-o", "#zion-n"]
+
       const tl = gsap.timeline({
         onComplete: () => {
           setAnimationCompleted(true)
@@ -26,6 +28,7 @@ export function AnimatedZionLogo({ onAnimationComplete, className = "" }: Animat
         },
       })
 
+      // Set initial states for all paths
       paths.forEach((selector) => {
         const path = svgRef.current?.querySelector(selector) as SVGPathElement
         if (path) {
@@ -38,14 +41,24 @@ export function AnimatedZionLogo({ onAnimationComplete, className = "" }: Animat
         }
       })
 
+      // Set the initial state for the line (hidden)
+      const line = svgRef.current?.querySelector("#horizontal-line") as SVGLineElement;
+      if (line) {
+        gsap.set(line, { opacity: 0 });
+      }
+
+      // Animate the drawing of each letter
       tl.to("#zion-z", { duration: 1, strokeDashoffset: 0, ease: "power2.inOut" })
         .to("#zion-i", { duration: 0.5, strokeDashoffset: 0, ease: "power2.inOut" }, "-=0.5")
         .to("#zion-o", { duration: 1.5, strokeDashoffset: 0, ease: "power2.inOut" }, "-=0.5")
         .to("#zion-n", { duration: 1, strokeDashoffset: 0, ease: "power2.inOut" }, "-=0.5")
+        // Fill the letters
         .to("#zion-z", { duration: 0.5, fillOpacity: 1, stroke: "none" })
         .to("#zion-i", { duration: 0.5, fillOpacity: 1, stroke: "none" }, "-=0.3")
         .to("#zion-o", { duration: 0.5, fillOpacity: 1, stroke: "none" }, "-=0.3")
         .to("#zion-n", { duration: 0.5, fillOpacity: 1, stroke: "none" }, "-=0.3")
+        // Animate the horizontal line to appear and cut through
+        .to("#horizontal-line", { duration: 0.8, opacity: 1, ease: "power2.inOut" }, "-=0.2");
     }
 
     loadGSAP()
@@ -87,6 +100,11 @@ export function AnimatedZionLogo({ onAnimationComplete, className = "" }: Animat
               stroke: #E8F0FF;
               stroke-width: 5px;
             }
+            #horizontal-line {
+              stroke: #000000;
+              stroke-width: 30px;
+              opacity: 0;
+            }
           `}
         </style>
       </defs>
@@ -115,6 +133,18 @@ export function AnimatedZionLogo({ onAnimationComplete, className = "" }: Animat
         fill="#FFFFFF"
         transform="translate(1095,179)"
       />
+
+      {/* Horizontal line that cuts through the letters */}
+      <line
+        id="horizontal-line"
+        x1="320"
+        y1="330"
+        x2="1450"
+        y2="320"
+      />
+
     </svg>
   )
 }
+
+export default AnimatedZionLogo
