@@ -104,7 +104,7 @@ export function Scene() {
   const size = 256 // Reduced size for better performance
   const pointsRef = useRef<THREE.Points>(null!)
   const { gl } = useThree()
-  
+
   // Create ping-pong FBOs for simulation
   const fboA = useFBO(size, size, {
     type: THREE.FloatType,
@@ -129,11 +129,11 @@ export function Scene() {
     const particles = new Float32Array(size * size * 4) // RGBA format
     const geometry = new THREE.TorusKnotGeometry(1.5, 0.4, 200, 32)
     const positions = geometry.attributes.position.array as Float32Array
-    
+
     for (let i = 0; i < size * size; i++) {
       const i4 = i * 4
       const p_i = (i * 3) % positions.length
-      
+
       // Add some randomness to initial positions
       const randomOffset = 0.1
       particles[i4 + 0] = positions[p_i + 0] + (Math.random() - 0.5) * randomOffset
@@ -144,10 +144,10 @@ export function Scene() {
 
     // Create original position texture
     const originalPositionTexture = new THREE.DataTexture(
-      particles, 
-      size, 
-      size, 
-      THREE.RGBAFormat, 
+      particles,
+      size,
+      size,
+      THREE.RGBAFormat,
       THREE.FloatType
     )
     originalPositionTexture.needsUpdate = true
@@ -158,7 +158,7 @@ export function Scene() {
     const tempMaterial = new THREE.MeshBasicMaterial({ map: originalPositionTexture })
     const tempMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), tempMaterial)
     tempScene.add(tempMesh)
-    
+
     // Initialize both FBOs
     gl.setRenderTarget(fboA)
     gl.render(tempScene, tempCamera)
@@ -183,15 +183,15 @@ export function Scene() {
     const { gl, clock } = state
     const scene = new THREE.Scene()
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
-    
+
     // Update simulation uniforms
     simulationMaterial.uniforms.uCurrentPosition.value = currentFBO.current.texture
     simulationMaterial.uniforms.uOriginalPosition.value = originalPositionTexture
     simulationMaterial.uniforms.uTime.value = clock.elapsedTime
-    
+
     const simulationMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), simulationMaterial)
     scene.add(simulationMesh)
-    
+
     // Render simulation to next FBO
     gl.setRenderTarget(nextFBO.current)
     gl.render(scene, camera)
@@ -218,11 +218,9 @@ export function Scene() {
     <>
       <points ref={pointsRef}>
         <bufferGeometry>
-          <bufferAttribute 
-            attach="attributes-position" 
-            count={size * size} 
-            array={particlePositions} 
-            itemSize={3} 
+          <bufferAttribute
+            attach="attributes-position"
+            args={[particlePositions, 3]}
           />
         </bufferGeometry>
         <primitive object={renderMaterial} attach="material" />
