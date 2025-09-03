@@ -24,19 +24,27 @@ const simulationMaterial = new THREE.ShaderMaterial({
     uniform float uSpeed;
 
     vec3 snoise(vec3 uv) {
-      uv.x += uTime * 0.01;
-      float s = sin(uv.z * 2.1) * 0.2 + cos(uv.y * 3.2) * 0.3 + sin(uv.x * 2.2) * 0.2;
-      float c = cos(uv.z * 2.1) * 0.2 + sin(uv.y * 3.2) * 0.3 + cos(uv.x * 2.2) * 0.2;
-      float s2 = sin(uv.y * 1.1) * 0.2 + cos(uv.x * 2.2) * 0.3 + sin(uv.z * 1.2) * 0.2;
-      float c2 = cos(uv.y * 1.1) * 0.2 + sin(uv.x * 2.2) * 0.3 + cos(uv.z * 1.2) * 0.2;
-      return vec3(s, c, s2 * c2) * uCurl;
+      uv.x += uTime * 0.005;
+      float s = sin(uv.z * 1.5) * 0.3 + cos(uv.y * 2.1) * 0.2 + sin(uv.x * 1.8) * 0.25;
+      float c = cos(uv.z * 1.5) * 0.3 + sin(uv.y * 2.1) * 0.2 + cos(uv.x * 1.8) * 0.25;
+      float s2 = sin(uv.y * 0.8) * 0.25 + cos(uv.x * 1.5) * 0.2 + sin(uv.z * 0.9) * 0.3;
+      return vec3(s, c, s2) * uCurl;
     }
 
     void main() {
       vec3 currentPos = texture2D(uCurrentPosition, vUv).xyz;
       vec3 originalPos = texture2D(uOriginalPosition, vUv).xyz;
-      vec3 noise = snoise(currentPos * 0.1);
+      
+      // Add noise-based movement
+      vec3 noise = snoise(currentPos * 0.15 + uTime * 0.1);
+      
+      // Apply movement with damping
       currentPos += noise * uSpeed;
+      
+      // Add slight attraction back to original position to prevent drift
+      vec3 attraction = (originalPos - currentPos) * 0.002;
+      currentPos += attraction;
+      
       gl_FragColor = vec4(currentPos, 1.0);
     }
   `,
@@ -44,8 +52,8 @@ const simulationMaterial = new THREE.ShaderMaterial({
     uCurrentPosition: { value: null },
     uOriginalPosition: { value: null },
     uTime: { value: 0 },
-    uCurl: { value: 1.5 },
-    uSpeed: { value: 0.01 },
+    uCurl: { value: 0.8 },
+    uSpeed: { value: 0.008 },
   },
 })
 
@@ -54,56 +62,83 @@ const renderMaterial = new THREE.ShaderMaterial({
     uniform sampler2D uPosition;
     uniform float uTime;
     varying vec3 vColor;
+    varying float vAlpha;
 
     void main() {
       vec3 pos = texture2D(uPosition, position.xy).xyz;
       gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-      gl_PointSize = 1.5;
-      vColor = normalize(pos) * 0.5 + 0.5;
+      gl_PointSize = 2.0;
+      
+      // Create dynamic colors based on position and time
+      vColor = normalize(pos) * 0.6 + 0.4;
+      vColor.r += sin(uTime * 0.5 + pos.x) * 0.2;
+      vColor.g += cos(uTime * 0.3 + pos.y) * 0.2;
+      vColor.b += sin(uTime * 0.7 + pos.z) * 0.2;
+      
+      vAlpha = 0.8;
     }
   `,
   fragmentShader: `
     varying vec3 vColor;
+    varying float vAlpha;
+    
     void main() {
-      gl_FragColor = vec4(vColor, 1.0);
+      // Create circular points
+      vec2 center = gl_PointCoord - 0.5;
+      float dist = length(center);
+      if (dist > 0.5) discard;
+      
+      float alpha = (1.0 - dist * 2.0) * vAlpha;
+      gl_FragColor = vec4(vColor, alpha);
     }
   `,
   uniforms: {
     uPosition: { value: null },
     uTime: { value: 0 },
   },
+  transparent: true,
+  blending: THREE.AdditiveBlending,
 })
 
 export function Scene() {
-  const size = 512
+  const size = 256 // Reduced size for better performance
   const pointsRef = useRef<THREE.Points>(null!)
   const { gl } = useThree()
+  
+  // Create ping-pong FBOs for simulation
+  const fboA = useFBO(size, size, {
+    type: THREE.FloatType,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    format: THREE.RGBAFormat,
+  })
+  const fboB = useFBO(size, size, {
+    type: THREE.FloatType,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    format: THREE.RGBAFormat,
+  })
 
-  // Create FBOs
-  const fbo1 = useFBO(size, size, {
-    type: THREE.FloatType,
-    minFilter: THREE.NearestFilter,
-    magFilter: THREE.NearestFilter,
-  })
-  const fbo2 = useFBO(size, size, {
-    type: THREE.FloatType,
-    minFilter: THREE.NearestFilter,
-    magFilter: THREE.NearestFilter,
-  })
+  // Track which FBO is current
+  const currentFBO = useRef(fboA)
+  const nextFBO = useRef(fboB)
 
   // Initialize particle positions and textures
-  const { particles, originalPositionTexture, particlePositions } = useMemo(() => {
+  const { originalPositionTexture, particlePositions } = useMemo(() => {
     // Initialize particle positions
     const particles = new Float32Array(size * size * 4) // RGBA format
-    const geometry = new THREE.TorusKnotGeometry(1.2, 0.3, 400, 32)
-    const positions = geometry.attributes.position.array
+    const geometry = new THREE.TorusKnotGeometry(1.5, 0.4, 200, 32)
+    const positions = geometry.attributes.position.array as Float32Array
     
     for (let i = 0; i < size * size; i++) {
       const i4 = i * 4
       const p_i = (i * 3) % positions.length
-      particles[i4 + 0] = positions[p_i + 0]
-      particles[i4 + 1] = positions[p_i + 1]
-      particles[i4 + 2] = positions[p_i + 2]
+      
+      // Add some randomness to initial positions
+      const randomOffset = 0.1
+      particles[i4 + 0] = positions[p_i + 0] + (Math.random() - 0.5) * randomOffset
+      particles[i4 + 1] = positions[p_i + 1] + (Math.random() - 0.5) * randomOffset
+      particles[i4 + 2] = positions[p_i + 2] + (Math.random() - 0.5) * randomOffset
       particles[i4 + 3] = 1.0 // Alpha
     }
 
@@ -117,14 +152,17 @@ export function Scene() {
     )
     originalPositionTexture.needsUpdate = true
 
-    // Initialize FBO1 with the initial positions
+    // Initialize both FBOs with the initial positions
     const tempScene = new THREE.Scene()
     const tempCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
     const tempMaterial = new THREE.MeshBasicMaterial({ map: originalPositionTexture })
     const tempMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), tempMaterial)
     tempScene.add(tempMesh)
     
-    gl.setRenderTarget(fbo1)
+    // Initialize both FBOs
+    gl.setRenderTarget(fboA)
+    gl.render(tempScene, tempCamera)
+    gl.setRenderTarget(fboB)
     gl.render(tempScene, tempCamera)
     gl.setRenderTarget(null)
 
@@ -137,40 +175,42 @@ export function Scene() {
       particlePositions[i3 + 2] = 0
     }
 
-    return { particles, originalPositionTexture, particlePositions }
-  }, [size, gl, fbo1])
+    return { originalPositionTexture, particlePositions }
+  }, [size, gl, fboA, fboB])
 
-  // Simulation loop
+  // Simulation Loop
   useFrame((state) => {
     const { gl, clock } = state
     const scene = new THREE.Scene()
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
     
-    // Update simulation
-    simulationMaterial.uniforms.uCurrentPosition.value = fbo1.texture
+    // Update simulation uniforms
+    simulationMaterial.uniforms.uCurrentPosition.value = currentFBO.current.texture
     simulationMaterial.uniforms.uOriginalPosition.value = originalPositionTexture
     simulationMaterial.uniforms.uTime.value = clock.elapsedTime
     
     const simulationMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), simulationMaterial)
     scene.add(simulationMesh)
     
-    gl.setRenderTarget(fbo2)
+    // Render simulation to next FBO
+    gl.setRenderTarget(nextFBO.current)
     gl.render(scene, camera)
     gl.setRenderTarget(null)
 
-    // Swap FBOs
-    const temp = fbo1.texture
-    fbo1.texture = fbo2.texture
-    fbo2.texture = temp
+    // Swap FBOs properly
+    const temp = currentFBO.current
+    currentFBO.current = nextFBO.current
+    nextFBO.current = temp
 
     // Update render material
-    renderMaterial.uniforms.uPosition.value = fbo1.texture
+    renderMaterial.uniforms.uPosition.value = currentFBO.current.texture
     renderMaterial.uniforms.uTime.value = clock.elapsedTime
 
-    // Rotate points
+    // Smooth rotation
     if (pointsRef.current) {
-      pointsRef.current.rotation.y += 0.001
-      pointsRef.current.rotation.x += 0.0005
+      pointsRef.current.rotation.y += 0.002
+      pointsRef.current.rotation.x += 0.001
+      pointsRef.current.rotation.z += 0.0005
     }
   })
 
@@ -188,8 +228,8 @@ export function Scene() {
         <primitive object={renderMaterial} attach="material" />
       </points>
       <EffectComposer>
-        <Bloom intensity={0.6} luminanceThreshold={0.1} luminanceSmoothing={0.9} height={1024} />
-        <N8AO quality="high" aoRadius={0.5} intensity={1.5} color="black" />
+        <Bloom intensity={0.4} luminanceThreshold={0.2} luminanceSmoothing={0.8} height={512} />
+        <N8AO quality="medium" aoRadius={0.3} intensity={1.2} color="black" />
       </EffectComposer>
     </>
   )
